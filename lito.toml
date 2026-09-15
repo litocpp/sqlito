@@ -1,0 +1,26 @@
+[package]
+name = "sqlito"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "sqlito"
+module = "sqlito"
+archive = "sqlito"
+
+[[test]]
+name = "sqlito-tests"
+sources = ["tests/main.cpp", "tests/statements.cpp", "tests/transactions.cpp", "tests/cancellation.cpp", "tests/executor.cpp"]
+link-stdlib = false
+
+[profile.base]
+exceptions = false
+rtti = false
+
+[dependencies]
+sqlito-sqlite = { path = "sqlite" }
+rstd-std = { version = "0.1.1", pub = true }
+
+[dev-dependencies]
+rstd-test = { version = "0.1.1" }
+rstd-nostd = { version = "0.1.1", usage = "link" }
