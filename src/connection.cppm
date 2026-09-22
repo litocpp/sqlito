@@ -181,6 +181,14 @@ public:
             sqlite3_bind_text64(
                 handle_, slot, ptr, value.len().to_primitive(), SQLITE_TRANSIENT, SQLITE_UTF8));
     }
+    auto bind_blob(usize index, slice<u8> value) -> Result<empty, Error> {
+        auto        slot = rstd_try(binding(index));
+        const void* ptr  = value.is_empty() ? static_cast<const void*>("")
+                                            : static_cast<const void*>(value.as_raw_ptr());
+        return bound(
+            index,
+            sqlite3_bind_blob64(handle_, slot, ptr, value.len().to_primitive(), SQLITE_TRANSIENT));
+    }
     auto bind_null(usize index) -> Result<empty, Error> {
         auto slot = rstd_try(binding(index));
         return bound(index, sqlite3_bind_null(handle_, slot));
@@ -222,6 +230,23 @@ public:
         if (type != SQLITE_INTEGER)
             return Err(error(ErrorKind::Type, "column is not an integer"_str));
         return Ok(Some(i64(sqlite3_column_int64(handle_, slot))));
+    }
+    auto blob(usize index) -> Result<Option<Vec<u8>>, Error> {
+        auto slot = rstd_try(column(index));
+        int  type = sqlite3_column_type(handle_, slot);
+        if (type == SQLITE_NULL) return Ok<Option<Vec<u8>>>(None());
+        if (type != SQLITE_BLOB) return Err(error(ErrorKind::Type, "column is not a blob"_str));
+        auto ptr = sqlite3_column_blob(handle_, slot);
+        if (! ptr) {
+            auto code = sqlite3_errcode(database_->handle);
+            if (code == SQLITE_NOMEM) return Err(database_error(database_->handle, code));
+            return Ok(Some(Vec<u8> {}));
+        }
+        auto length = usize(sqlite3_column_bytes(handle_, slot));
+        auto bytes  = slice<u8>::from_raw_parts(static_cast<const rstd::byte*>(ptr), length);
+        auto value  = Vec<u8>::with_capacity(length);
+        for (auto byte : bytes) value.push(rstd::move(byte));
+        return Ok(Some(rstd::move(value)));
     }
     auto text(usize index) -> Result<Option<String>, Error> {
         auto slot = rstd_try(column(index));
