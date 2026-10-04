@@ -263,6 +263,46 @@ public:
     }
 };
 
+} // namespace sqlito
+
+namespace sqlito
+{
+auto execute_batch_owned(const Arc<Database>& db, ref<str> sql, unsigned long long token)
+    -> Result<empty, Error> {
+    if (! db || ! db->valid(token))
+        return Err(error(ErrorKind::State, "session is unavailable"_str));
+    auto bytes  = rstd_try(terminated(sql));
+    auto cursor = reinterpret_cast<const char*>(bytes.data());
+    while (*cursor) {
+        if (! db->valid(token)) return Err(error(ErrorKind::State, "session is unavailable"_str));
+        if (db->cancelled()) return Err(error(ErrorKind::Cancelled, "operation cancelled"_str));
+        sqlite3_stmt* statement = nullptr;
+        const char*   tail      = nullptr;
+        auto          code      = sqlite3_prepare_v2(db->handle, cursor, -1, &statement, &tail);
+        struct Finalize {
+            sqlite3_stmt* statement;
+            ~Finalize() {
+                if (statement) (void)sqlite3_finalize(statement);
+            }
+        } cleanup { statement };
+        if (code != SQLITE_OK) return Err(database_error(db->handle, code));
+        if (tail == cursor) return Err(error(ErrorKind::Input, "SQL parser made no progress"_str));
+        cursor = tail;
+        if (! statement) continue;
+        if (sqlite3_bind_parameter_count(statement) != 0)
+            return Err(error(ErrorKind::Unbound, "batch statements cannot contain parameters"_str));
+        do {
+            code = sqlite3_step(statement);
+        } while (code == SQLITE_ROW);
+        if (code != SQLITE_DONE) return Err(database_error(db->handle, code));
+    }
+    return Ok(empty {});
+}
+
+} // namespace sqlito
+
+export namespace sqlito
+{
 // Synchronous session: serialize all operations on the connection and its
 // statements.
 class Connection {
@@ -314,6 +354,10 @@ public:
     }
     auto prepare(ref<str> sql) -> Result<Statement, Error> {
         return prepare_owned(database_, sql, 0);
+    }
+    // Batches are not implicitly atomic; use a Transaction when all statements must commit together.
+    auto execute_batch(ref<str> sql) -> Result<empty, Error> {
+        return execute_batch_owned(database_, sql, 0);
     }
     auto idle() -> bool {
         return database_ && database_->valid(0) && database_->cancellation.is_none() &&
@@ -425,6 +469,10 @@ public:
         return finish("COMMIT");
     }
     auto rollback() -> Result<empty, Error> { return finish("ROLLBACK"); }
+    auto execute_batch(ref<str> sql) -> Result<empty, Error> {
+        if (! token_) return Err(error(ErrorKind::State, "transaction is not active"_str));
+        return execute_batch_owned(database_, sql, token_);
+    }
 };
 
 auto Connection::begin(TransactionMode mode) -> Result<Transaction, Error> {

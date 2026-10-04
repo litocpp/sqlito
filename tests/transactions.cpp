@@ -132,3 +132,39 @@ TEST(Transactions, FileReopenPreservesOnlyCommittedWrites) {
     EXPECT_EQ(*result.integer(usize()).unwrap(), i64(1));
     EXPECT_EQ(*result.integer(usize(1)).unwrap(), i64(1));
 }
+
+TEST(Transactions, BatchUsesSqliteStatementBoundaries) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+    auto tx = db.begin().unwrap();
+    ASSERT_TRUE(tx.execute_batch("-- comment;\nCREATE TABLE batch(value TEXT);"
+                                 "CREATE TRIGGER expand AFTER INSERT ON batch WHEN new.value='a;b' "
+                                 "BEGIN INSERT INTO batch VALUES('c;d'); END;"
+                                 "INSERT INTO batch VALUES('a;b'); /* trailing; */"_str)
+                    .is_ok());
+    ASSERT_TRUE(tx.commit().is_ok());
+    auto count = db.prepare("SELECT count(*) FROM batch"_str).unwrap();
+    ASSERT_EQ(count.step().unwrap(), sqlito::Step::Row);
+    EXPECT_EQ(*count.integer(usize()).unwrap(), i64(2));
+}
+
+TEST(Transactions, BatchFailureRollsBackWithTransaction) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+    {
+        auto tx = db.begin().unwrap();
+        EXPECT_TRUE(
+            tx.execute_batch("CREATE TABLE batch(id INTEGER); INSERT INTO missing VALUES(1);"_str)
+                .is_err());
+    }
+    EXPECT_TRUE(db.prepare("SELECT * FROM batch"_str).is_err());
+}
+
+TEST(Transactions, BatchRejectsParametersControlAndExpiredSession) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+    EXPECT_TRUE(db.execute_batch("SELECT ?"_str).is_err());
+    EXPECT_TRUE(db.execute_batch("BEGIN"_str).is_err());
+    auto tx = db.begin().unwrap();
+    EXPECT_TRUE(db.execute_batch("SELECT 1"_str).is_err());
+    EXPECT_TRUE(tx.execute_batch("COMMIT"_str).is_err());
+    ASSERT_TRUE(tx.rollback().is_ok());
+    EXPECT_TRUE(tx.execute_batch("SELECT 1"_str).is_err());
+}

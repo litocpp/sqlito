@@ -19,8 +19,8 @@ rtti = false
 
 [dependencies]
 sqlito-sqlite = { path = "sqlite" }
-rstd-std = { version = "0.1.1", pub = true }
+rstd-std = { version = "0.1.2", pub = true }
 
 [dev-dependencies]
-rstd-test = { version = "0.1.1" }
-rstd-nostd = { version = "0.1.1", usage = "link" }
+rstd-test = { version = "0.1.2" }
+rstd-nostd = { version = "0.1.2", usage = "link" }
