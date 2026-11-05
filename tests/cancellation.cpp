@@ -75,3 +75,27 @@ TEST(Cancellation, ScopeRejectsNestedRunAndClose) {
     ASSERT_TRUE(result.is_ok());
     ASSERT_TRUE(db.close().is_ok());
 }
+
+TEST(Cancellation, LastChangesRejectsCancelledSession) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+    ASSERT_TRUE(db.execute_batch("CREATE TABLE items(id INTEGER);"_str).is_ok());
+    auto cancel = sqlito::Cancellation::make();
+    auto result = db.run(cancel, [&](auto& session) -> Result<empty, sqlito::Error> {
+        auto tx     = session.begin().unwrap();
+        auto insert = tx.prepare("INSERT INTO items VALUES(1)"_str).unwrap();
+        EXPECT_EQ(insert.step().unwrap(), sqlito::Step::Done);
+        cancel.cancel();
+        EXPECT_EQ(tx.last_changes().unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+        return tx.commit();
+    });
+    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(db.last_changes().unwrap(), u64(1));
+
+    auto cancelled = sqlito::Cancellation::make();
+    auto direct    = db.run(cancelled, [&](auto& session) -> Result<empty, sqlito::Error> {
+        cancelled.cancel();
+        EXPECT_EQ(session.last_changes().unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+        return Ok(empty {});
+    });
+    EXPECT_TRUE(direct.is_ok());
+}

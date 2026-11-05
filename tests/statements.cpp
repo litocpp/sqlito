@@ -118,3 +118,99 @@ TEST(Sqlite, PinnedEngineAndFts5AreAvailable) {
     EXPECT_EQ(query.step().unwrap(), sqlito::Step::Row);
     EXPECT_EQ(*query.integer(usize()).unwrap(), i64(1));
 }
+
+TEST(Sqlite, LastChangesTracksConnectionRatherThanStatements) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+    ASSERT_TRUE(db.execute_batch("CREATE TABLE items(id INTEGER PRIMARY KEY);"
+                                 "INSERT INTO items VALUES(1),(2),(3);"_str)
+                    .is_ok());
+    EXPECT_EQ(db.last_changes().unwrap(), u64(3));
+    auto select = db.prepare("SELECT id FROM items WHERE id=1"_str).unwrap();
+    ASSERT_EQ(select.step().unwrap(), sqlito::Step::Row);
+    ASSERT_EQ(select.step().unwrap(), sqlito::Step::Done);
+    EXPECT_EQ(db.last_changes().unwrap(), u64(3));
+    ASSERT_TRUE(db.execute_batch("CREATE TABLE other(id INTEGER)"_str).is_ok());
+    EXPECT_EQ(db.last_changes().unwrap(), u64(3));
+    auto remove = db.prepare("DELETE FROM items WHERE id <= ?"_str).unwrap();
+    ASSERT_TRUE(remove.bind(usize(1), i64(2)).is_ok());
+    ASSERT_EQ(remove.step().unwrap(), sqlito::Step::Done);
+    auto count = db.last_changes().unwrap();
+    EXPECT_EQ(count, u64(2));
+    ASSERT_TRUE(remove.reset().is_ok());
+    EXPECT_EQ(db.last_changes().unwrap(), u64(2));
+    auto insert = db.prepare("INSERT INTO other VALUES(4)"_str).unwrap();
+    ASSERT_EQ(insert.step().unwrap(), sqlito::Step::Done);
+    EXPECT_EQ(db.last_changes().unwrap(), u64(1));
+    EXPECT_EQ(count, u64(2));
+    ASSERT_TRUE(remove.bind(usize(1), i64(0)).is_ok());
+    ASSERT_EQ(remove.step().unwrap(), sqlito::Step::Done);
+    EXPECT_EQ(db.last_changes().unwrap(), u64(0));
+}
+
+TEST(Sqlite, LastChangesExcludesTriggerAndForeignKeyChanges) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+    ASSERT_TRUE(db.execute_batch("PRAGMA foreign_keys=ON;"
+                                 "CREATE TABLE parent(id INTEGER PRIMARY KEY);"
+                                 "CREATE TABLE child(id INTEGER PRIMARY KEY, parent INTEGER "
+                                 "REFERENCES parent(id) ON DELETE CASCADE);"
+                                 "CREATE TABLE audit(id INTEGER);"
+                                 "CREATE TRIGGER removed AFTER DELETE ON parent BEGIN "
+                                 "INSERT INTO audit VALUES(old.id); END;"
+                                 "INSERT INTO parent VALUES(1),(2);"
+                                 "INSERT INTO child VALUES(10,1),(11,1),(12,2);"_str)
+                    .is_ok());
+    auto remove = db.prepare("DELETE FROM parent WHERE id=1"_str).unwrap();
+    ASSERT_EQ(remove.step().unwrap(), sqlito::Step::Done);
+    EXPECT_EQ(db.last_changes().unwrap(), u64(1));
+    auto check = db.prepare("SELECT (SELECT count(*) FROM child), "
+                            "(SELECT count(*) FROM audit)"_str)
+                     .unwrap();
+    ASSERT_EQ(check.step().unwrap(), sqlito::Step::Row);
+    EXPECT_EQ(*check.integer(usize()).unwrap(), i64(1));
+    EXPECT_EQ(*check.integer(usize(1)).unwrap(), i64(1));
+}
+
+TEST(Sqlite, LastChangesReturningRequiresFinalStep) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+    ASSERT_TRUE(db.execute_batch("CREATE TABLE items(id INTEGER PRIMARY KEY);"
+                                 "CREATE TABLE other(id INTEGER);"
+                                 "INSERT INTO items VALUES(1),(2);"_str)
+                    .is_ok());
+    auto remove = db.prepare("DELETE FROM items RETURNING id"_str).unwrap();
+    ASSERT_EQ(remove.step().unwrap(), sqlito::Step::Row);
+    EXPECT_EQ(db.last_changes().unwrap(), u64(2));
+    auto other = db.prepare("INSERT INTO other VALUES(1)"_str).unwrap();
+    ASSERT_EQ(other.step().unwrap(), sqlito::Step::Done);
+    EXPECT_EQ(db.last_changes().unwrap(), u64(1));
+    ASSERT_EQ(remove.step().unwrap(), sqlito::Step::Row);
+    ASSERT_EQ(remove.step().unwrap(), sqlito::Step::Done);
+    EXPECT_EQ(db.last_changes().unwrap(), u64(2));
+}
+
+TEST(Sqlite, LastChangesAfterFailureIsNotTheFailedStatementResult) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+    ASSERT_TRUE(db.execute_batch("CREATE TABLE items(id INTEGER PRIMARY KEY);"
+                                 "INSERT INTO items VALUES(1),(2);"_str)
+                    .is_ok());
+    auto failure = db.prepare("INSERT INTO items VALUES(1)"_str).unwrap();
+    ASSERT_TRUE(failure.step().is_err());
+    // SQLite's connection counter is not a success result for the failed statement.
+    auto after_error = db.last_changes().unwrap();
+    ASSERT_TRUE(failure.reset().is_err());
+    EXPECT_EQ(db.last_changes().unwrap(), after_error);
+    auto missing = db.prepare("DELETE FROM items WHERE id=999"_str).unwrap();
+    ASSERT_EQ(missing.step().unwrap(), sqlito::Step::Done);
+    EXPECT_EQ(db.last_changes().unwrap(), u64(0));
+}
+
+TEST(Sqlite, LastChangesWithCountChangesPragma) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+    ASSERT_TRUE(db.execute_batch("CREATE TABLE items(id INTEGER);"
+                                 "INSERT INTO items VALUES(1),(2),(3);"
+                                 "PRAGMA count_changes=ON;"_str)
+                    .is_ok());
+    auto remove = db.prepare("DELETE FROM items WHERE id<3"_str).unwrap();
+    ASSERT_EQ(remove.step().unwrap(), sqlito::Step::Row);
+    ASSERT_EQ(remove.step().unwrap(), sqlito::Step::Done);
+    EXPECT_EQ(db.last_changes().unwrap(), u64(2));
+}
