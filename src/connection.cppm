@@ -41,6 +41,14 @@ enum class Step
     Row,
     Done
 };
+enum class ColumnType
+{
+    Null,
+    Integer,
+    Real,
+    Text,
+    Blob
+};
 enum class TransactionMode
 {
     Deferred,
@@ -742,6 +750,22 @@ public:
         database_->callback_error = None();
         return complete(call, Result<empty, Error>(Ok(empty {})));
     }
+    auto column_type(usize index) -> Result<ColumnType, Error> {
+        if (! database_) return Err(error(ErrorKind::State, "statement is unavailable"_str));
+        DatabaseCall call(database_);
+        if (! call.entered) return Err(error(ErrorKind::State, "connection is occupied"_str));
+        auto       slot = rstd_try(column(index));
+        ColumnType type;
+        switch (sqlite3_column_type(handle_, slot)) {
+        case SQLITE_NULL: type = ColumnType::Null; break;
+        case SQLITE_INTEGER: type = ColumnType::Integer; break;
+        case SQLITE_FLOAT: type = ColumnType::Real; break;
+        case SQLITE_TEXT: type = ColumnType::Text; break;
+        case SQLITE_BLOB: type = ColumnType::Blob; break;
+        default: return Err(error(ErrorKind::Type, "unknown column type"_str));
+        }
+        return complete(call, Result<ColumnType, Error>(Ok(type)));
+    }
     auto integer(usize index) -> Result<Option<i64>, Error> {
         if (! database_) return Err(error(ErrorKind::State, "statement is unavailable"_str));
         DatabaseCall call(database_);
@@ -754,6 +778,18 @@ public:
             return Err(error(ErrorKind::Type, "column is not an integer"_str));
         return complete(
             call, Result<Option<i64>, Error>(Ok(Some(i64(sqlite3_column_int64(handle_, slot))))));
+    }
+    auto real(usize index) -> Result<Option<double>, Error> {
+        if (! database_) return Err(error(ErrorKind::State, "statement is unavailable"_str));
+        DatabaseCall call(database_);
+        if (! call.entered) return Err(error(ErrorKind::State, "connection is occupied"_str));
+        auto slot = rstd_try(column(index));
+        int  type = sqlite3_column_type(handle_, slot);
+        if (type == SQLITE_NULL)
+            return complete(call, Result<Option<double>, Error>(Ok<Option<double>>(None())));
+        if (type != SQLITE_FLOAT) return Err(error(ErrorKind::Type, "column is not real"_str));
+        return complete(
+            call, Result<Option<double>, Error>(Ok(Some(sqlite3_column_double(handle_, slot)))));
     }
     auto blob(usize index) -> Result<Option<Vec<u8>>, Error> {
         if (! database_) return Err(error(ErrorKind::State, "statement is unavailable"_str));

@@ -49,6 +49,27 @@ TEST(Sqlite, BindingTypesAndOwnedResults) {
     EXPECT_EQ(text->as_str(), "a'b\0c"_str);
     EXPECT_EQ(statement.step().unwrap_err().kind, sqlito::ErrorKind::Unbound);
 }
+TEST(Sqlite, RealColumnTypeAndState) {
+    auto db        = sqlito::Connection::open(":memory:"_str).unwrap();
+    auto statement = db.prepare("SELECT 1.25, NULL, 2, '3', x'04'"_str).unwrap();
+    EXPECT_EQ(statement.real(usize()).unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(statement.column_type(usize()).unwrap_err().kind, sqlito::ErrorKind::State);
+    ASSERT_TRUE(statement.step().is_ok());
+    EXPECT_EQ(statement.column_type(usize()).unwrap(), sqlito::ColumnType::Real);
+    EXPECT_EQ(statement.column_type(usize(1)).unwrap(), sqlito::ColumnType::Null);
+    EXPECT_EQ(statement.column_type(usize(2)).unwrap(), sqlito::ColumnType::Integer);
+    EXPECT_EQ(statement.column_type(usize(3)).unwrap(), sqlito::ColumnType::Text);
+    EXPECT_EQ(statement.column_type(usize(4)).unwrap(), sqlito::ColumnType::Blob);
+    EXPECT_TRUE(statement.column_type(usize(5)).is_err());
+    EXPECT_EQ(*statement.real(usize()).unwrap(), 1.25);
+    EXPECT_TRUE(statement.real(usize(1)).unwrap().is_none());
+    EXPECT_EQ(statement.real(usize(2)).unwrap_err().kind, sqlito::ErrorKind::Type);
+    EXPECT_EQ(statement.real(usize(3)).unwrap_err().kind, sqlito::ErrorKind::Type);
+    EXPECT_EQ(statement.real(usize(4)).unwrap_err().kind, sqlito::ErrorKind::Type);
+    EXPECT_TRUE(statement.real(usize(5)).is_err());
+    EXPECT_EQ(statement.step().unwrap(), sqlito::Step::Done);
+    EXPECT_EQ(statement.real(usize()).unwrap_err().kind, sqlito::ErrorKind::State);
+}
 TEST(Sqlite, StatementKeepsConnectionAliveAndCloseReportsBusy) {
     auto statement = [] {
         auto db        = sqlito::Connection::open(":memory:"_str).unwrap();
