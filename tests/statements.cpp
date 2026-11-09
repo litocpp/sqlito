@@ -235,3 +235,14 @@ TEST(Sqlite, LastChangesWithCountChangesPragma) {
     ASSERT_EQ(remove.step().unwrap(), sqlito::Step::Done);
     EXPECT_EQ(db.last_changes().unwrap(), u64(2));
 }
+
+TEST(Sqlite, BindsRealValues) {
+    auto db   = sqlito::Connection::open(":memory:"_str).unwrap();
+    auto stmt = db.prepare("SELECT ?1, typeof(?1), ?2"_str).unwrap();
+    ASSERT_TRUE(stmt.bind(usize(1), 0.5).is_ok());
+    ASSERT_TRUE(stmt.bind(usize(2), -1.25).is_ok());
+    ASSERT_EQ(stmt.step().unwrap(), sqlito::Step::Row);
+    EXPECT_EQ(stmt.real(usize()).unwrap().unwrap(), 0.5);
+    EXPECT_TRUE(stmt.text(usize(1)).unwrap().unwrap().as_str() == "real"_str);
+    EXPECT_EQ(stmt.real(usize(2)).unwrap().unwrap(), -1.25);
+}

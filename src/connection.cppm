@@ -668,6 +668,13 @@ public:
         return complete(call,
                         bound(index, sqlite3_bind_int64(handle_, slot, value.to_primitive())));
     }
+    auto bind(usize index, double value) -> Result<empty, Error> {
+        if (! database_) return Err(error(ErrorKind::State, "statement is unavailable"_str));
+        DatabaseCall call(database_);
+        if (! call.entered) return Err(error(ErrorKind::State, "connection is occupied"_str));
+        auto slot = rstd_try(binding(index));
+        return complete(call, bound(index, sqlite3_bind_double(handle_, slot, value)));
+    }
     auto bind_text(usize index, ref<str> value) -> Result<empty, Error> {
         if (! database_) return Err(error(ErrorKind::State, "statement is unavailable"_str));
         DatabaseCall call(database_);
