@@ -13,7 +13,7 @@ TEST(Cancellation, PreCancelledSkipsCallback) {
         return Ok(empty {});
     });
     EXPECT_FALSE(called);
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
 }
 TEST(Cancellation, RunningQueryStopsAndConnectionCanBeReused) {
     auto db     = sqlito::Connection::open(":memory:"_str).unwrap();
@@ -35,8 +35,8 @@ TEST(Cancellation, RunningQueryStopsAndConnectionCanBeReused) {
     });
     ASSERT_TRUE(result.is_err());
     auto failure = result.unwrap_err();
-    EXPECT_EQ(failure.kind, sqlito::ErrorKind::Cancelled);
-    EXPECT_EQ(failure.code, 9);
+    EXPECT_EQ(failure.kind(), sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(failure.code(), 9);
     auto query = db.prepare("SELECT 1"_str).unwrap();
     EXPECT_EQ(query.step().unwrap(), sqlito::Step::Row);
 }
@@ -54,7 +54,7 @@ TEST(Cancellation, CancelledCommitStillRollsBack) {
         cancel.cancel();
         return tx.commit();
     });
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
     auto tx    = db.begin().unwrap();
     auto count = tx.prepare("SELECT count(*) FROM notes"_str).unwrap();
     ASSERT_EQ(count.step().unwrap(), sqlito::Step::Row);
@@ -69,7 +69,7 @@ TEST(Cancellation, ScopeRejectsNestedRunAndClose) {
         auto nested = session.run(cancel, [](auto&) -> Result<empty, sqlito::Error> {
             return Ok(empty {});
         });
-        EXPECT_EQ(nested.unwrap_err().kind, sqlito::ErrorKind::State);
+        EXPECT_EQ(nested.unwrap_err().kind(), sqlito::ErrorKind::State);
         return Ok(empty {});
     });
     ASSERT_TRUE(result.is_ok());
@@ -85,16 +85,16 @@ TEST(Cancellation, LastChangesRejectsCancelledSession) {
         auto insert = tx.prepare("INSERT INTO items VALUES(1)"_str).unwrap();
         EXPECT_EQ(insert.step().unwrap(), sqlito::Step::Done);
         cancel.cancel();
-        EXPECT_EQ(tx.last_changes().unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+        EXPECT_EQ(tx.last_changes().unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
         return tx.commit();
     });
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
     EXPECT_EQ(db.last_changes().unwrap(), u64(1));
 
     auto cancelled = sqlito::Cancellation::make();
     auto direct    = db.run(cancelled, [&](auto& session) -> Result<empty, sqlito::Error> {
         cancelled.cancel();
-        EXPECT_EQ(session.last_changes().unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+        EXPECT_EQ(session.last_changes().unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
         return Ok(empty {});
     });
     EXPECT_TRUE(direct.is_ok());

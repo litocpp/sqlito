@@ -15,24 +15,24 @@ TEST(Returning, InsertUpdateAndNoMatch) {
             db.prepare(
                   "INSERT INTO state VALUES(?1,1,?2) ON CONFLICT(namespace) DO NOTHING RETURNING revision,data"_str)
                 .unwrap();
-        EXPECT_EQ(insert.integer(usize()).unwrap_err().kind, sqlito::ErrorKind::State);
+        EXPECT_EQ(insert.integer(usize()).unwrap_err().kind(), sqlito::ErrorKind::State);
         ASSERT_TRUE(insert.bind_text(usize(1), "plugin"_str).is_ok());
-        EXPECT_EQ(insert.step().unwrap_err().kind, sqlito::ErrorKind::Unbound);
+        EXPECT_EQ(insert.step().unwrap_err().kind(), sqlito::ErrorKind::Unbound);
         ASSERT_TRUE(insert.bind_text(usize(2), "中文\0opaque"_str).is_ok());
         ASSERT_EQ(insert.step().unwrap(), sqlito::Step::Row);
         EXPECT_EQ(insert.integer(usize()).unwrap().unwrap(), i64(1));
-        EXPECT_EQ(insert.integer(usize(1)).unwrap_err().kind, sqlito::ErrorKind::Type);
+        EXPECT_EQ(insert.integer(usize(1)).unwrap_err().kind(), sqlito::ErrorKind::Type);
         auto stored = insert.text(usize(1)).unwrap().unwrap();
         EXPECT_EQ(stored.as_str(), "中文\0opaque"_str);
         EXPECT_FALSE(db.idle());
         ASSERT_EQ(insert.step().unwrap(), sqlito::Step::Done);
-        EXPECT_EQ(insert.text(usize(1)).unwrap_err().kind, sqlito::ErrorKind::State);
+        EXPECT_EQ(insert.text(usize(1)).unwrap_err().kind(), sqlito::ErrorKind::State);
         EXPECT_EQ(stored.as_str(), "中文\0opaque"_str);
         ASSERT_TRUE(insert.reset().is_ok());
         ASSERT_TRUE(insert.bind_text(usize(1), "plugin"_str).is_ok());
         ASSERT_TRUE(insert.bind_text(usize(2), "replacement"_str).is_ok());
         EXPECT_EQ(insert.step().unwrap(), sqlito::Step::Done);
-        EXPECT_EQ(insert.integer(usize()).unwrap_err().kind, sqlito::ErrorKind::State);
+        EXPECT_EQ(insert.integer(usize()).unwrap_err().kind(), sqlito::ErrorKind::State);
     }
     EXPECT_TRUE(db.idle());
     {
@@ -71,9 +71,9 @@ TEST(Returning, ErrorsNullAndInvalidUtf8) {
     {
         auto stmt = db.prepare("INSERT INTO state VALUES(1,?1) RETURNING id,value"_str).unwrap();
         ASSERT_TRUE(stmt.bind_text(usize(1), "reject"_str).is_ok());
-        EXPECT_EQ(stmt.step().unwrap_err().kind, sqlito::ErrorKind::Database);
-        EXPECT_EQ(stmt.step().unwrap_err().kind, sqlito::ErrorKind::State);
-        EXPECT_EQ(stmt.text(usize(1)).unwrap_err().kind, sqlito::ErrorKind::State);
+        EXPECT_EQ(stmt.step().unwrap_err().kind(), sqlito::ErrorKind::Database);
+        EXPECT_EQ(stmt.step().unwrap_err().kind(), sqlito::ErrorKind::State);
+        EXPECT_EQ(stmt.text(usize(1)).unwrap_err().kind(), sqlito::ErrorKind::State);
     }
     {
         auto stmt = db.prepare("INSERT INTO state VALUES(1,NULL) RETURNING id,value"_str).unwrap();
@@ -85,7 +85,7 @@ TEST(Returning, ErrorsNullAndInvalidUtf8) {
         auto stmt =
             db.prepare("UPDATE state SET value=CAST(X'FF' AS TEXT) RETURNING value"_str).unwrap();
         ASSERT_EQ(stmt.step().unwrap(), sqlito::Step::Row);
-        EXPECT_EQ(stmt.text(usize()).unwrap_err().kind, sqlito::ErrorKind::Type);
+        EXPECT_EQ(stmt.text(usize()).unwrap_err().kind(), sqlito::ErrorKind::Type);
         ASSERT_EQ(stmt.step().unwrap(), sqlito::Step::Done);
     }
     EXPECT_TRUE(db.idle());
@@ -132,7 +132,7 @@ TEST(Returning, CancellationBetweenRowAndDoneDoesNotPromiseRollback) {
         return stmt.step();
     });
     ASSERT_TRUE(result.is_err());
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
     EXPECT_TRUE(db.idle());
     auto query = db.prepare("SELECT count(*) FROM state"_str).unwrap();
     ASSERT_EQ(query.step().unwrap(), sqlito::Step::Row);
@@ -151,7 +151,7 @@ TEST(Returning, CancellationBetweenRowAndDoneRollsBackExplicitTransaction) {
         return stmt.step();
     });
     ASSERT_TRUE(result.is_err());
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
     EXPECT_TRUE(db.idle());
     auto query = db.prepare("SELECT count(*) FROM state"_str).unwrap();
     ASSERT_EQ(query.step().unwrap(), sqlito::Step::Row);
@@ -174,7 +174,7 @@ TEST(Returning, DeferredConstraintFailsCommitAfterRowsAndRollsBack) {
         }
         auto committed = tx.commit();
         ASSERT_TRUE(committed.is_err());
-        EXPECT_EQ(committed.unwrap_err().kind, sqlito::ErrorKind::Database);
+        EXPECT_EQ(committed.unwrap_err().kind(), sqlito::ErrorKind::Database);
         ASSERT_TRUE(tx.rollback().is_ok());
     }
     EXPECT_TRUE(db.idle());
@@ -203,7 +203,7 @@ TEST(Returning, BusyAtCompletionMustNotReportSuccess) {
         EXPECT_EQ(stmt.integer(usize()).unwrap().unwrap(), i64(1));
         auto done = stmt.step();
         ASSERT_TRUE(done.is_err());
-        EXPECT_EQ(done.unwrap_err().kind, sqlito::ErrorKind::Database);
+        EXPECT_EQ(done.unwrap_err().kind(), sqlito::ErrorKind::Database);
     }
     EXPECT_TRUE(reader.idle());
     EXPECT_TRUE(writer.idle());

@@ -87,7 +87,7 @@ TEST(Executor, DroppedOperationRetainsCapacityUntilWorkerCleansUp) {
         gate->wait_started();
     }
     auto full = handle.submit(value);
-    EXPECT_EQ(full.unwrap_err().kind, sqlito::ErrorKind::Busy);
+    EXPECT_EQ(full.unwrap_err().kind(), sqlito::ErrorKind::Busy);
     gate->release();
     ASSERT_TRUE(runtime.block_on(executor.shutdown()).is_ok());
 }
@@ -111,11 +111,11 @@ TEST(Executor, CancelledQueueEntryDoesNotRunAndStopRejectsAdmission) {
                       })
                       .unwrap();
     second.cancel();
-    EXPECT_EQ(handle.submit(value).unwrap_err().kind, sqlito::ErrorKind::Busy);
+    EXPECT_EQ(handle.submit(value).unwrap_err().kind(), sqlito::ErrorKind::Busy);
     gate->release();
     ASSERT_TRUE(runtime.block_on(rstd::move(first)).is_ok());
     auto cancelled = runtime.block_on(rstd::move(second));
-    EXPECT_EQ(cancelled.unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(cancelled.unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
     EXPECT_FALSE(called->load(rstd::sync::atomic::Ordering::Acquire));
     auto next = handle.submit(value).unwrap();
     ASSERT_TRUE(runtime.block_on(rstd::move(next)).is_ok());
@@ -174,13 +174,16 @@ TEST(Executor, ConcurrentSubmittersShareCapacityAndStopCancelsQueuedWork) {
                   }).unwrap();
     auto second = rstd::move(left).join().unwrap().unwrap();
     auto third  = rstd::move(right).join().unwrap().unwrap();
-    EXPECT_EQ(handle.submit(value).unwrap_err().kind, sqlito::ErrorKind::Busy);
+    EXPECT_EQ(handle.submit(value).unwrap_err().kind(), sqlito::ErrorKind::Busy);
     executor.request_stop();
-    EXPECT_EQ(handle.submit(value).unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(handle.submit(value).unwrap_err().kind(), sqlito::ErrorKind::State);
     gate->release();
-    EXPECT_EQ(runtime.block_on(rstd::move(first)).unwrap_err().kind, sqlito::ErrorKind::Cancelled);
-    EXPECT_EQ(runtime.block_on(rstd::move(second)).unwrap_err().kind, sqlito::ErrorKind::Cancelled);
-    EXPECT_EQ(runtime.block_on(rstd::move(third)).unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(runtime.block_on(rstd::move(first)).unwrap_err().kind(),
+              sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(runtime.block_on(rstd::move(second)).unwrap_err().kind(),
+              sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(runtime.block_on(rstd::move(third)).unwrap_err().kind(),
+              sqlito::ErrorKind::Cancelled);
     ASSERT_TRUE(runtime.block_on(executor.shutdown()).is_ok());
 }
 TEST(Executor, CallbackDestroyedBeforeResultAndCapacityReuse) {
@@ -222,7 +225,7 @@ TEST(Executor, ShutdownInterruptsRunningQueryAndCompletesAfterCleanup) {
     (void)runtime.block_on(rstd::async::sleep(rstd::time::Duration::from_millis(u64(30))));
     executor.request_stop();
     auto result = runtime.block_on(rstd::move(operation));
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
     ASSERT_TRUE(runtime.block_on(executor.shutdown()).is_ok());
 }
 TEST(Executor, RejectsEscapedStatementAndRecoversAfterItsDestruction) {
@@ -235,7 +238,7 @@ TEST(Executor, RejectsEscapedStatementAndRecoversAfterItsDestruction) {
                         })
                         .unwrap();
     auto result   = runtime.block_on(rstd::move(bad));
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::State);
     auto next = handle.submit(value).unwrap();
     EXPECT_EQ(runtime.block_on(rstd::move(next)).unwrap(), i64(42));
     ASSERT_TRUE(runtime.block_on(executor.shutdown()).is_ok());

@@ -1,6 +1,7 @@
 module;
 #include <sqlite3.h>
 #include <rstd/macro.hpp>
+#include <rstd/enum.hpp>
 #include <climits>
 #include <cstring>
 export module sqlito:connection;
@@ -30,11 +31,167 @@ struct CallbackFailure {
     String    message;
 };
 using FtsFailure = CallbackFailure;
-struct Error {
-    ErrorKind               kind;
-    int                     code;
-    String                  message;
-    Option<CallbackFailure> callback;
+class Error {
+    RSTD_ENUM(Error,
+              (Database, (int code; String message;)),
+              (State, (int code; String message;)),
+              (Input, (int code; String message;)),
+              (Unbound, (int code; String message;)),
+              (Type, (int code; String message;)),
+              (Range, (int code; String message;)),
+              (Cancelled, (int code; String message;)),
+              (Busy, (int code; String message;)),
+              (Callback, (ErrorKind kind; int code; String message; CallbackFailure failure;)))
+
+public:
+    static auto from(ErrorKind kind, int code, String message) -> Error {
+        switch (kind) {
+        case ErrorKind::Database: return Error::Database(code, rstd::move(message));
+        case ErrorKind::State: return Error::State(code, rstd::move(message));
+        case ErrorKind::Input: return Error::Input(code, rstd::move(message));
+        case ErrorKind::Unbound: return Error::Unbound(code, rstd::move(message));
+        case ErrorKind::Type: return Error::Type(code, rstd::move(message));
+        case ErrorKind::Range: return Error::Range(code, rstd::move(message));
+        case ErrorKind::Cancelled: return Error::Cancelled(code, rstd::move(message));
+        case ErrorKind::Busy: return Error::Busy(code, rstd::move(message));
+        }
+        return Error::State(code, rstd::move(message));
+    }
+    static auto with_callback(Error error, CallbackFailure failure) -> Error {
+        auto kind    = error.kind();
+        auto code    = error.code();
+        auto message = String::make(error.message());
+        return Error::Callback(kind, code, rstd::move(message), rstd::move(failure));
+    }
+    auto kind() const -> ErrorKind {
+        RSTD_MATCH(*this) {
+            RSTD_CASE(Database, code, message) {
+                return ErrorKind::Database;
+            }
+            RSTD_CASE(State, code, message) {
+                return ErrorKind::State;
+            }
+            RSTD_CASE(Input, code, message) {
+                return ErrorKind::Input;
+            }
+            RSTD_CASE(Unbound, code, message) {
+                return ErrorKind::Unbound;
+            }
+            RSTD_CASE(Type, code, message) {
+                return ErrorKind::Type;
+            }
+            RSTD_CASE(Range, code, message) {
+                return ErrorKind::Range;
+            }
+            RSTD_CASE(Cancelled, code, message) {
+                return ErrorKind::Cancelled;
+            }
+            RSTD_CASE(Busy, code, message) {
+                return ErrorKind::Busy;
+            }
+            RSTD_CASE(Callback, kind, code, message, failure) {
+                return kind;
+            }
+        }
+        return ErrorKind::State;
+    }
+    auto code() const -> int {
+        RSTD_MATCH(*this) {
+            RSTD_CASE(Database, code, message) {
+                return code;
+            }
+            RSTD_CASE(State, code, message) {
+                return code;
+            }
+            RSTD_CASE(Input, code, message) {
+                return code;
+            }
+            RSTD_CASE(Unbound, code, message) {
+                return code;
+            }
+            RSTD_CASE(Type, code, message) {
+                return code;
+            }
+            RSTD_CASE(Range, code, message) {
+                return code;
+            }
+            RSTD_CASE(Cancelled, code, message) {
+                return code;
+            }
+            RSTD_CASE(Busy, code, message) {
+                return code;
+            }
+            RSTD_CASE(Callback, kind, code, message, failure) {
+                return code;
+            }
+        }
+        return 0;
+    }
+    auto message() const -> ref<str> {
+        RSTD_MATCH(*this) {
+            RSTD_CASE(Database, code, message) {
+                return message.as_str();
+            }
+            RSTD_CASE(State, code, message) {
+                return message.as_str();
+            }
+            RSTD_CASE(Input, code, message) {
+                return message.as_str();
+            }
+            RSTD_CASE(Unbound, code, message) {
+                return message.as_str();
+            }
+            RSTD_CASE(Type, code, message) {
+                return message.as_str();
+            }
+            RSTD_CASE(Range, code, message) {
+                return message.as_str();
+            }
+            RSTD_CASE(Cancelled, code, message) {
+                return message.as_str();
+            }
+            RSTD_CASE(Busy, code, message) {
+                return message.as_str();
+            }
+            RSTD_CASE(Callback, kind, code, message, failure) {
+                return message.as_str();
+            }
+        }
+        return ""_str;
+    }
+    auto callback() const -> Option<CallbackFailure> {
+        RSTD_MATCH(*this) {
+            RSTD_CASE(Callback, kind, code, message, failure) {
+                return Some(
+                    CallbackFailure { failure.kind, failure.code, failure.message.clone() });
+            }
+            RSTD_CASE(Database, code, message) {
+                return Option<CallbackFailure>(None());
+            }
+            RSTD_CASE(State, code, message) {
+                return Option<CallbackFailure>(None());
+            }
+            RSTD_CASE(Input, code, message) {
+                return Option<CallbackFailure>(None());
+            }
+            RSTD_CASE(Unbound, code, message) {
+                return Option<CallbackFailure>(None());
+            }
+            RSTD_CASE(Type, code, message) {
+                return Option<CallbackFailure>(None());
+            }
+            RSTD_CASE(Range, code, message) {
+                return Option<CallbackFailure>(None());
+            }
+            RSTD_CASE(Cancelled, code, message) {
+                return Option<CallbackFailure>(None());
+            }
+            RSTD_CASE(Busy, code, message) {
+                return Option<CallbackFailure>(None());
+            }
+        }
+        return Option<CallbackFailure>(None());
+    }
 };
 enum class Step
 {
@@ -165,15 +322,16 @@ public:
 namespace sqlito
 {
 auto error(ErrorKind kind, ref<str> message) -> Error {
-    return { kind, 0, String::make(message) };
+    return Error::from(kind, 0, String::make(message));
 }
 auto database_error(sqlite3* db, int code) -> Error {
     auto bytes =
         rstd::ffi::CStr::from_ptr(db ? sqlite3_errmsg(db) : sqlite3_errstr(code)).to_bytes();
     auto text = rstd::str_::from_utf8(bytes);
-    return { (code & 255) == SQLITE_INTERRUPT ? ErrorKind::Cancelled : ErrorKind::Database,
-             code,
-             String::make(text.is_ok() ? *text : "SQLite error"_str) };
+    return Error::from((code & 255) == SQLITE_INTERRUPT ? ErrorKind::Cancelled
+                                                        : ErrorKind::Database,
+                       code,
+                       String::make(text.is_ok() ? *text : "SQLite error"_str));
 }
 auto terminated(ref<str> input) -> Result<Vec<u8>, Error> {
     for (auto byte : input.as_bytes())
@@ -302,11 +460,12 @@ struct Database {
     }
 };
 auto database_error(Database& db, int code) -> Error {
-    auto result     = database_error(db.handle, code);
-    result.callback = db.callback_error.take();
-    if (result.callback.is_some() && result.callback->kind == ErrorKind::Cancelled)
-        result.kind = ErrorKind::Cancelled;
-    return result;
+    auto result   = database_error(db.handle, code);
+    auto callback = db.callback_error.take();
+    if (callback.is_none()) return result;
+    if (callback->kind == ErrorKind::Cancelled)
+        result = Error::from(ErrorKind::Cancelled, result.code(), String::make(result.message()));
+    return Error::with_callback(rstd::move(result), rstd::move(callback).unwrap());
 }
 struct DatabaseCall {
     Arc<Database> owner;

@@ -34,7 +34,7 @@ TEST(Sqlite, IdleTracksOwnedStatementsAcrossMovesAndFtsCaches) {
 TEST(Sqlite, BindingTypesAndOwnedResults) {
     auto db        = sqlito::Connection::open(":memory:"_str).unwrap();
     auto statement = db.prepare("SELECT ?1, ?2, ?3"_str).unwrap();
-    EXPECT_EQ(statement.step().unwrap_err().kind, sqlito::ErrorKind::Unbound);
+    EXPECT_EQ(statement.step().unwrap_err().kind(), sqlito::ErrorKind::Unbound);
     ASSERT_TRUE(statement.bind(usize(1), i64(42)).is_ok());
     ASSERT_TRUE(statement.bind_text(usize(2), "a'b\0c"_str).is_ok());
     ASSERT_TRUE(statement.bind_null(usize(3)).is_ok());
@@ -42,18 +42,18 @@ TEST(Sqlite, BindingTypesAndOwnedResults) {
     EXPECT_EQ(*statement.integer(usize()).unwrap(), i64(42));
     auto text = statement.text(usize(1)).unwrap();
     EXPECT_TRUE(statement.integer(usize(2)).unwrap().is_none());
-    EXPECT_EQ(statement.integer(usize(1)).unwrap_err().kind, sqlito::ErrorKind::Type);
+    EXPECT_EQ(statement.integer(usize(1)).unwrap_err().kind(), sqlito::ErrorKind::Type);
     EXPECT_EQ(statement.step().unwrap(), sqlito::Step::Done);
     EXPECT_TRUE(statement.step().is_err());
     ASSERT_TRUE(statement.reset().is_ok());
     EXPECT_EQ(text->as_str(), "a'b\0c"_str);
-    EXPECT_EQ(statement.step().unwrap_err().kind, sqlito::ErrorKind::Unbound);
+    EXPECT_EQ(statement.step().unwrap_err().kind(), sqlito::ErrorKind::Unbound);
 }
 TEST(Sqlite, RealColumnTypeAndState) {
     auto db        = sqlito::Connection::open(":memory:"_str).unwrap();
     auto statement = db.prepare("SELECT 1.25, NULL, 2, '3', x'04'"_str).unwrap();
-    EXPECT_EQ(statement.real(usize()).unwrap_err().kind, sqlito::ErrorKind::State);
-    EXPECT_EQ(statement.column_type(usize()).unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(statement.real(usize()).unwrap_err().kind(), sqlito::ErrorKind::State);
+    EXPECT_EQ(statement.column_type(usize()).unwrap_err().kind(), sqlito::ErrorKind::State);
     ASSERT_TRUE(statement.step().is_ok());
     EXPECT_EQ(statement.column_type(usize()).unwrap(), sqlito::ColumnType::Real);
     EXPECT_EQ(statement.column_type(usize(1)).unwrap(), sqlito::ColumnType::Null);
@@ -63,12 +63,12 @@ TEST(Sqlite, RealColumnTypeAndState) {
     EXPECT_TRUE(statement.column_type(usize(5)).is_err());
     EXPECT_EQ(*statement.real(usize()).unwrap(), 1.25);
     EXPECT_TRUE(statement.real(usize(1)).unwrap().is_none());
-    EXPECT_EQ(statement.real(usize(2)).unwrap_err().kind, sqlito::ErrorKind::Type);
-    EXPECT_EQ(statement.real(usize(3)).unwrap_err().kind, sqlito::ErrorKind::Type);
-    EXPECT_EQ(statement.real(usize(4)).unwrap_err().kind, sqlito::ErrorKind::Type);
+    EXPECT_EQ(statement.real(usize(2)).unwrap_err().kind(), sqlito::ErrorKind::Type);
+    EXPECT_EQ(statement.real(usize(3)).unwrap_err().kind(), sqlito::ErrorKind::Type);
+    EXPECT_EQ(statement.real(usize(4)).unwrap_err().kind(), sqlito::ErrorKind::Type);
     EXPECT_TRUE(statement.real(usize(5)).is_err());
     EXPECT_EQ(statement.step().unwrap(), sqlito::Step::Done);
-    EXPECT_EQ(statement.real(usize()).unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(statement.real(usize()).unwrap_err().kind(), sqlito::ErrorKind::State);
 }
 TEST(Sqlite, StatementKeepsConnectionAliveAndCloseReportsBusy) {
     auto statement = [] {
@@ -111,7 +111,7 @@ TEST(Sqlite, WritesAndReportsConstraintFailure) {
     ASSERT_TRUE(insert.bind_null(usize(2)).is_ok());
     auto failed = insert.step();
     ASSERT_TRUE(failed.is_err());
-    EXPECT_EQ(failed.unwrap_err().kind, sqlito::ErrorKind::Database);
+    EXPECT_EQ(failed.unwrap_err().kind(), sqlito::ErrorKind::Database);
     EXPECT_TRUE(insert.step().is_err());
     EXPECT_TRUE(insert.reset().is_err());
     ASSERT_TRUE(insert.bind(usize(1), i64(2)).is_ok());

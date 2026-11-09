@@ -75,9 +75,9 @@ TEST(Scalar, DeterministicFlagAndExpiredOwner) {
     auto result = stmt.step();
     ASSERT_TRUE(result.is_err());
     auto failure = result.unwrap_err();
-    ASSERT_TRUE(failure.callback.is_some());
-    EXPECT_EQ(failure.callback->kind, sqlito::ErrorKind::State);
-    EXPECT_EQ(failure.message.as_str(), "scalar registration expired"_str);
+    ASSERT_TRUE(failure.callback().is_some());
+    EXPECT_EQ(failure.callback()->kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(failure.message(), "scalar registration expired"_str);
 
     auto nondeterministic = db.register_or_replace_scalar_function(
                                   String::make("other"_str), observing_scalar(seen.clone()), false)
@@ -183,7 +183,7 @@ TEST(Scalar, CallbackReleaseDefersResourcesAndRollsBack) {
     }
     auto result = stmt.step();
     ASSERT_TRUE(result.is_err());
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::State);
     auto count = db.prepare("SELECT count(*) FROM items"_str).unwrap();
     ASSERT_EQ(count.step().unwrap(), sqlito::Step::Row);
     EXPECT_EQ(*count.integer(usize()).unwrap(), i64());
@@ -203,11 +203,11 @@ TEST(Scalar, CallbackErrorAndCancellation) {
     auto failure_result = bad.step();
     ASSERT_TRUE(failure_result.is_err());
     auto failure = failure_result.unwrap_err();
-    ASSERT_TRUE(failure.callback.is_some());
-    EXPECT_EQ(failure.callback->kind, sqlito::ErrorKind::Input);
-    EXPECT_EQ(failure.callback->code, 29);
-    EXPECT_EQ(failure.callback->message.as_str(), "invalid scalar"_str);
-    EXPECT_EQ(failure.message.as_str(), "invalid scalar"_str);
+    ASSERT_TRUE(failure.callback().is_some());
+    EXPECT_EQ(failure.callback()->kind, sqlito::ErrorKind::Input);
+    EXPECT_EQ(failure.callback()->code, 29);
+    EXPECT_EQ(failure.callback()->message.as_str(), "invalid scalar"_str);
+    EXPECT_EQ(failure.message(), "invalid scalar"_str);
 
     auto cancelled_failure = sqlito::ScalarFunction::make(
         [](const sqlito::ScalarInput&) noexcept -> Result<Option<String>, sqlito::CallbackFailure> {
@@ -222,10 +222,10 @@ TEST(Scalar, CallbackErrorAndCancellation) {
     auto cancelled_result = cancelled_stmt.step();
     ASSERT_TRUE(cancelled_result.is_err());
     auto cancelled_error = cancelled_result.unwrap_err();
-    EXPECT_EQ(cancelled_error.kind, sqlito::ErrorKind::Cancelled);
-    EXPECT_EQ(cancelled_error.message.as_str(), "取消"_str);
-    ASSERT_TRUE(cancelled_error.callback.is_some());
-    EXPECT_EQ(cancelled_error.callback->code, 17);
+    EXPECT_EQ(cancelled_error.kind(), sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(cancelled_error.message(), "取消"_str);
+    ASSERT_TRUE(cancelled_error.callback().is_some());
+    EXPECT_EQ(cancelled_error.callback()->code, 17);
 
     auto cancel = sqlito::Cancellation::make();
     auto cancelled =
@@ -243,7 +243,7 @@ TEST(Scalar, CallbackErrorAndCancellation) {
         return Ok(empty {});
     });
     ASSERT_TRUE(result.is_err());
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
 }
 
 struct ScalarGate {

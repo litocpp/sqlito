@@ -173,11 +173,11 @@ TEST(Transactions, LastChangesRequiresTheActiveSessionAndDoesNotPromiseCommit) {
     auto db = sqlito::Connection::open(":memory:"_str).unwrap();
     execute(db, "CREATE TABLE items(id INTEGER PRIMARY KEY)"_str);
     auto tx = db.begin().unwrap();
-    EXPECT_EQ(db.last_changes().unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(db.last_changes().unwrap_err().kind(), sqlito::ErrorKind::State);
     execute(tx, "INSERT INTO items VALUES(1),(2)"_str);
     EXPECT_EQ(tx.last_changes().unwrap(), u64(2));
     ASSERT_TRUE(tx.rollback().is_ok());
-    EXPECT_EQ(tx.last_changes().unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(tx.last_changes().unwrap_err().kind(), sqlito::ErrorKind::State);
     EXPECT_EQ(db.last_changes().unwrap(), u64(2));
     auto count = db.prepare("SELECT count(*) FROM items"_str).unwrap();
     ASSERT_EQ(count.step().unwrap(), sqlito::Step::Row);

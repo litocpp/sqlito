@@ -51,8 +51,8 @@ TEST(Fts, DroppingOwnerMakesFurtherCallbacksFail) {
     auto result = db.execute_batch("INSERT INTO docs VALUES('another')"_str);
     ASSERT_TRUE(result.is_err());
     auto failure = result.unwrap_err();
-    ASSERT_TRUE(failure.callback.is_some());
-    EXPECT_EQ(failure.callback->kind, sqlito::ErrorKind::State);
+    ASSERT_TRUE(failure.callback().is_some());
+    EXPECT_EQ(failure.callback()->kind, sqlito::ErrorKind::State);
 }
 TEST(Fts, ReplacementKeepsPriorLiveInstancesSeparate) {
     auto                            db = sqlito::Connection::open(":memory:"_str).unwrap();
@@ -120,7 +120,7 @@ TEST(Fts, CallbackReleasesStatementAndTransactionWithoutReentry) {
     }
     auto result = insert.step();
     ASSERT_TRUE(result.is_err());
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::State);
     auto count = db.prepare("SELECT count(*) FROM docs"_str).unwrap();
     ASSERT_EQ(count.step().unwrap(), sqlito::Step::Row);
     EXPECT_EQ(*count.integer(usize()).unwrap(), i64());
@@ -193,7 +193,7 @@ TEST(Fts, StaleTransactionCannotOverrideCurrentRollback) {
         }
         auto result = insert.step();
         ASSERT_TRUE(result.is_err());
-        EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::State);
+        EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::State);
         auto count = db.prepare("SELECT count(*) FROM docs"_str).unwrap();
         ASSERT_EQ(count.step().unwrap(), sqlito::Step::Row);
         EXPECT_EQ(*count.integer(usize()).unwrap(), i64());
@@ -279,11 +279,11 @@ TEST(Fts, SqliteAndCallbackErrorsSurviveDeferredRollback) {
     auto result = insert.step();
     ASSERT_TRUE(result.is_err());
     auto failure = result.unwrap_err();
-    EXPECT_EQ(failure.kind, sqlito::ErrorKind::Database);
-    ASSERT_TRUE(failure.callback.is_some());
-    EXPECT_EQ(failure.callback->kind, sqlito::ErrorKind::Input);
-    EXPECT_EQ(failure.callback->code, 77);
-    EXPECT_EQ(failure.callback->message.as_str(), "token failure"_str);
+    EXPECT_EQ(failure.kind(), sqlito::ErrorKind::Database);
+    ASSERT_TRUE(failure.callback().is_some());
+    EXPECT_EQ(failure.callback()->kind, sqlito::ErrorKind::Input);
+    EXPECT_EQ(failure.callback()->code, 77);
+    EXPECT_EQ(failure.callback()->message.as_str(), "token failure"_str);
     auto count = db.prepare("SELECT count(*) FROM docs"_str).unwrap();
     ASSERT_EQ(count.step().unwrap(), sqlito::Step::Row);
     EXPECT_EQ(*count.integer(usize()).unwrap(), i64());
@@ -426,8 +426,8 @@ TEST(Fts, IgnoredInvalidTokenStillStopsOperation) {
     auto result = db.execute_batch("INSERT INTO docs VALUES('x')"_str);
     ASSERT_TRUE(result.is_err());
     auto failure = result.unwrap_err();
-    ASSERT_TRUE(failure.callback.is_some());
-    EXPECT_EQ(failure.callback->kind, sqlito::ErrorKind::Input);
+    ASSERT_TRUE(failure.callback().is_some());
+    EXPECT_EQ(failure.callback()->kind, sqlito::ErrorKind::Input);
 }
 
 TEST(Fts, TokenRangesMustBeInInputOrder) {
@@ -461,8 +461,8 @@ TEST(Fts, TokenRangesMustBeInInputOrder) {
         if (reversed) {
             ASSERT_TRUE(result.is_err());
             auto failure = result.unwrap_err();
-            ASSERT_TRUE(failure.callback.is_some());
-            EXPECT_EQ(failure.callback->kind, sqlito::ErrorKind::Input);
+            ASSERT_TRUE(failure.callback().is_some());
+            EXPECT_EQ(failure.callback()->kind, sqlito::ErrorKind::Input);
         } else {
             EXPECT_TRUE(result.is_ok());
         }
@@ -518,7 +518,7 @@ TEST(Fts, CancellationFromTokenizerPropagates) {
         return session.execute_batch("INSERT INTO docs VALUES('x')"_str);
     });
     ASSERT_TRUE(result.is_err());
-    EXPECT_EQ(result.unwrap_err().kind, sqlito::ErrorKind::Cancelled);
+    EXPECT_EQ(result.unwrap_err().kind(), sqlito::ErrorKind::Cancelled);
 }
 
 TEST(Fts, FactoryErrorDoesNotLeakToNextOperation) {
@@ -547,8 +547,8 @@ TEST(Fts, FactoryErrorDoesNotLeakToNextOperation) {
     auto bad = db.prepare("SELECT * FROM docs WHERE docs MATCH 'x'"_str);
     auto failure =
         bad.is_err() ? rstd::move(bad).unwrap_err() : rstd::move(bad).unwrap().step().unwrap_err();
-    ASSERT_TRUE(failure.callback.is_some());
-    EXPECT_EQ(failure.callback->code, 23);
+    ASSERT_TRUE(failure.callback().is_some());
+    EXPECT_EQ(failure.callback()->code, 23);
     auto good = db.prepare("SELECT 1"_str).unwrap();
     ASSERT_EQ(good.step().unwrap(), sqlito::Step::Row);
     EXPECT_EQ(*good.integer(usize()).unwrap(), i64(1));

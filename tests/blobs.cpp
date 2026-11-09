@@ -42,10 +42,10 @@ TEST(SqliteBlob, CopiesBindingAndReturnsOwnedBinaryAcrossResetAndFinalize) {
         saved = statement.blob(usize()).unwrap().unwrap();
         EXPECT_EQ(saved.len(), usize(4));
         EXPECT_EQ(saved[usize(1)], u8(255));
-        EXPECT_EQ(statement.text(usize()).unwrap_err().kind, sqlito::ErrorKind::Type);
+        EXPECT_EQ(statement.text(usize()).unwrap_err().kind(), sqlito::ErrorKind::Type);
         EXPECT_EQ(statement.step().unwrap(), sqlito::Step::Done);
         statement.reset().unwrap();
-        EXPECT_EQ(statement.step().unwrap_err().kind, sqlito::ErrorKind::Unbound);
+        EXPECT_EQ(statement.step().unwrap_err().kind(), sqlito::ErrorKind::Unbound);
     }
     EXPECT_EQ(saved[usize()], u8());
     EXPECT_EQ(saved[usize(2)], u8(128));
@@ -64,7 +64,7 @@ TEST(SqliteBlob, DistinguishesEmptyNullAndOtherStorageTypes) {
     EXPECT_TRUE(statement.blob(usize(1)).unwrap().is_none());
     EXPECT_EQ(statement.text(usize(5)).unwrap()->as_str(), "blob"_str);
     for (usize column(2); column < usize(5); ++column)
-        EXPECT_EQ(statement.blob(column).unwrap_err().kind, sqlito::ErrorKind::Type);
+        EXPECT_EQ(statement.blob(column).unwrap_err().kind(), sqlito::ErrorKind::Type);
 }
 
 TEST(SqliteBlob, EnforcesStateIndicesMovesAndTransactionLifetime) {
@@ -72,17 +72,17 @@ TEST(SqliteBlob, EnforcesStateIndicesMovesAndTransactionLifetime) {
     auto tx        = db.begin(sqlito::TransactionMode::Immediate).unwrap();
     auto statement = tx.prepare("SELECT ?1"_str).unwrap();
     auto bytes     = "binary"_str.as_bytes();
-    EXPECT_EQ(statement.blob(usize()).unwrap_err().kind, sqlito::ErrorKind::State);
-    EXPECT_EQ(statement.bind_blob(usize(), bytes).unwrap_err().kind, sqlito::ErrorKind::Range);
-    EXPECT_EQ(statement.bind_blob(usize(2), bytes).unwrap_err().kind, sqlito::ErrorKind::Range);
+    EXPECT_EQ(statement.blob(usize()).unwrap_err().kind(), sqlito::ErrorKind::State);
+    EXPECT_EQ(statement.bind_blob(usize(), bytes).unwrap_err().kind(), sqlito::ErrorKind::Range);
+    EXPECT_EQ(statement.bind_blob(usize(2), bytes).unwrap_err().kind(), sqlito::ErrorKind::Range);
     statement.bind_blob(usize(1), bytes).unwrap();
     auto moved = rstd::move(statement);
-    EXPECT_EQ(statement.bind_blob(usize(1), bytes).unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(statement.bind_blob(usize(1), bytes).unwrap_err().kind(), sqlito::ErrorKind::State);
     moved.step().unwrap();
-    EXPECT_EQ(moved.blob(usize(1)).unwrap_err().kind, sqlito::ErrorKind::Range);
-    EXPECT_EQ(moved.bind_blob(usize(1), bytes).unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(moved.blob(usize(1)).unwrap_err().kind(), sqlito::ErrorKind::Range);
+    EXPECT_EQ(moved.bind_blob(usize(1), bytes).unwrap_err().kind(), sqlito::ErrorKind::State);
     auto saved = moved.blob(usize()).unwrap().unwrap();
     tx.rollback().unwrap();
-    EXPECT_EQ(moved.blob(usize()).unwrap_err().kind, sqlito::ErrorKind::State);
+    EXPECT_EQ(moved.blob(usize()).unwrap_err().kind(), sqlito::ErrorKind::State);
     EXPECT_EQ(saved.len(), bytes.len());
 }
