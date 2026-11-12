@@ -275,6 +275,32 @@ public:
 using ScalarFunction = alloc::boxed::Box<
     dyn<FnMut<Result<Option<String>, CallbackFailure>(const ScalarInput&) noexcept>>>;
 } // namespace sqlito
+
+namespace rstd
+{
+export template<>
+struct Impl<fmt::Display, sqlito::Error> : ImplBase<sqlito::Error> {
+    auto fmt(fmt::Formatter& formatter) const -> bool {
+        return formatter.write_str(this->self().message());
+    }
+};
+
+export template<>
+struct Impl<fmt::Debug, sqlito::Error> : ImplBase<sqlito::Error> {
+    auto fmt(fmt::Formatter& formatter) const -> bool {
+        const auto& error = this->self();
+        return formatter.write_fmt(fmt::Arguments::make(
+            "sqlito::Error {{ kind: {}, code: {}, message: {:?} }}",
+            static_cast<int>(error.kind()), error.code(), error.message()));
+    }
+};
+
+export template<>
+struct Impl<error::Error, sqlito::Error>
+    : DefaultInImpl<error::Error, sqlito::Error> {
+    auto source() const noexcept -> Option<error::ErrorRef> { return None(); }
+};
+} // namespace rstd
 namespace sqlito
 {
 struct FtsTokenOwner {
