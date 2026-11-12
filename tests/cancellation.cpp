@@ -3,6 +3,45 @@ import sqlito;
 using namespace rstd::prelude;
 using namespace rstd::literals;
 
+TEST(Cancellation, CurrentSnapshotFollowsRunWithoutRetainingConnection) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+    EXPECT_TRUE(db.cancellation().is_none());
+    auto                         cancel = sqlito::Cancellation::make();
+    Option<sqlito::Cancellation> captured;
+    auto result = db.run(cancel, [&](auto& session) -> Result<empty, sqlito::Error> {
+        captured = session.cancellation();
+        EXPECT_TRUE(captured.is_some());
+        if (captured.is_none()) return Ok(empty {});
+        EXPECT_FALSE(captured->cancelled());
+        cancel.cancel();
+        EXPECT_TRUE(captured->cancelled());
+        return Ok(empty {});
+    });
+    EXPECT_TRUE(result.is_ok());
+    EXPECT_TRUE(db.cancellation().is_none());
+    EXPECT_TRUE(db.close().is_ok());
+    ASSERT_TRUE(captured.is_some());
+    EXPECT_TRUE(captured->cancelled());
+}
+
+TEST(Cancellation, TransactionSnapshotEndsAtRollback) {
+    auto db     = sqlito::Connection::open(":memory:"_str).unwrap();
+    auto cancel = sqlito::Cancellation::make();
+    auto result = db.run(cancel, [&](auto& session) -> Result<empty, sqlito::Error> {
+        auto tx       = session.begin().unwrap();
+        auto snapshot = tx.cancellation();
+        EXPECT_TRUE(snapshot.is_some());
+        cancel.cancel();
+        if (snapshot.is_some()) EXPECT_TRUE(snapshot->cancelled());
+        auto rolled_back = tx.rollback();
+        EXPECT_TRUE(rolled_back.is_ok());
+        EXPECT_TRUE(tx.cancellation().is_none());
+        return Ok(empty {});
+    });
+    EXPECT_TRUE(result.is_ok());
+    EXPECT_TRUE(db.cancellation().is_none());
+}
+
 TEST(Cancellation, PreCancelledSkipsCallback) {
     auto db     = sqlito::Connection::open(":memory:"_str).unwrap();
     auto cancel = sqlito::Cancellation::make();

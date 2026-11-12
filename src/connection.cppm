@@ -1460,6 +1460,15 @@ public:
     }
     auto begin(TransactionMode mode = TransactionMode::Deferred) -> Result<Transaction, Error>;
 
+    // A snapshot observes the current run without retaining the connection.
+    auto cancellation() const -> Option<Cancellation> {
+        if (! database_) return None();
+        DatabaseCall call(database_);
+        if (! call.entered || ! database_->valid(0)) return None();
+        return database_->cancellation.is_some() ? Some(database_->cancellation->clone())
+                                                 : None<Cancellation>();
+    }
+
     // Synchronous callback; keep all statements, blobs and transactions inside its
     // scope. Cancellation is cooperative and does not undo a completed commit.
     template<class F>
@@ -1580,6 +1589,13 @@ public:
         return *this;
     }
     ~Transaction() { release(); }
+    auto cancellation() const -> Option<Cancellation> {
+        if (! database_) return None();
+        DatabaseCall call(database_);
+        if (! call.entered || ! token_ || ! database_->valid(token_)) return None();
+        return database_->cancellation.is_some() ? Some(database_->cancellation->clone())
+                                                 : None<Cancellation>();
+    }
     auto prepare(ref<str> sql) -> Result<Statement, Error> {
         if (! token_) return Err(error(ErrorKind::State, "transaction is not active"_str));
         return Connection::prepare_owned(database_, sql, token_);
