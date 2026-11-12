@@ -212,6 +212,11 @@ enum class TransactionMode
     Immediate,
     Exclusive
 };
+enum class BlobMode
+{
+    ReadOnly,
+    ReadWrite
+};
 class Cancellation {
     Arc<AtomicBool> state_;
     explicit Cancellation(Arc<AtomicBool> state): state_(rstd::move(state)) {}
@@ -289,15 +294,16 @@ export template<>
 struct Impl<fmt::Debug, sqlito::Error> : ImplBase<sqlito::Error> {
     auto fmt(fmt::Formatter& formatter) const -> bool {
         const auto& error = this->self();
-        return formatter.write_fmt(fmt::Arguments::make(
-            "sqlito::Error {{ kind: {}, code: {}, message: {:?} }}",
-            static_cast<int>(error.kind()), error.code(), error.message()));
+        return formatter.write_fmt(
+            fmt::Arguments::make("sqlito::Error {{ kind: {}, code: {}, message: {:?} }}",
+                                 static_cast<int>(error.kind()),
+                                 error.code(),
+                                 error.message()));
     }
 };
 
 export template<>
-struct Impl<error::Error, sqlito::Error>
-    : DefaultInImpl<error::Error, sqlito::Error> {
+struct Impl<error::Error, sqlito::Error> : DefaultInImpl<error::Error, sqlito::Error> {
     auto source() const noexcept -> Option<error::ErrorRef> { return None(); }
 };
 } // namespace rstd
@@ -371,16 +377,21 @@ auto database_error(Database& db, int code) -> Error;
 struct Database {
     sqlite3*           handle;
     unsigned long long active {}, generation {};
-    unsigned long long statements {};
+    unsigned long long statements {}, blobs {};
     bool               control_allowed {}, poisoned {};
     struct StatementNode {
         sqlite3_stmt*  statement {};
         StatementNode* next {};
     };
+    struct BlobNode {
+        sqlite3_blob* blob {};
+        BlobNode*     next {};
+    };
     struct Gate {
         bool               busy {};
         unsigned long long pending_rollback {};
         StatementNode*     deferred {};
+        BlobNode*          deferred_blobs {};
     };
     rstd::sync::Mutex<Gate> gate { Gate {} };
     rstd::sync::Condvar     gate_changed;
@@ -429,6 +440,27 @@ struct Database {
         }
         if (drain_here) drain();
     }
+    auto close_blob(BlobNode* node) -> int {
+        int  code = sqlite3_blob_close(node->blob);
+        auto owned =
+            alloc::boxed::Box<BlobNode>::from_raw(rstd::mut_ptr<BlobNode>::from_raw_parts(node));
+        --blobs;
+        return code;
+    }
+    void release_blob(BlobNode* node) {
+        if (! node) return;
+        bool drain_here = false;
+        {
+            auto state            = gate.lock().unwrap();
+            node->next            = state->deferred_blobs;
+            state->deferred_blobs = node;
+            if (! state->busy) {
+                state->busy = true;
+                drain_here  = true;
+            }
+        }
+        if (drain_here) drain();
+    }
     void defer_rollback(unsigned long long token) {
         bool drain_here = false;
         {
@@ -446,14 +478,18 @@ struct Database {
         for (;;) {
             unsigned long long token {};
             StatementNode*     node = nullptr;
+            BlobNode*          blob = nullptr;
             {
                 auto state = gate.lock().unwrap();
                 token      = rstd::exchange(state->pending_rollback, 0ULL);
                 if (! token && state->deferred) {
                     node            = state->deferred;
                     state->deferred = node->next;
+                } else if (! token && state->deferred_blobs) {
+                    blob                  = state->deferred_blobs;
+                    state->deferred_blobs = blob->next;
                 }
-                if (! token && ! node) {
+                if (! token && ! node && ! blob) {
                     state->busy = false;
                     gate_changed.notify_all();
                     return rolled_back;
@@ -478,6 +514,11 @@ struct Database {
                 auto owned     = alloc::boxed::Box<StatementNode>::from_raw(
                     rstd::mut_ptr<StatementNode>::from_raw_parts(node));
                 --statements;
+            }
+            if (blob) {
+                callback_error = None();
+                (void)close_blob(blob);
+                callback_error = None();
             }
         }
     }
@@ -776,6 +817,163 @@ export namespace sqlito
 {
 class Connection;
 class Transaction;
+// Fixed-size incremental I/O. The handle retains its connection owner; all
+// operations share the session gate, and transaction handles expire on rollback.
+class Blob {
+    friend class Connection;
+    friend class Transaction;
+    Arc<Database>       database_;
+    Database::BlobNode* node_ {};
+    unsigned long long  token_ {};
+    BlobMode            mode_;
+    usize               length_;
+
+    Blob(Arc<Database> db, Database::BlobNode* node, unsigned long long token, BlobMode mode)
+        : database_(rstd::move(db)),
+          node_(node),
+          token_(token),
+          mode_(mode),
+          length_(usize(sqlite3_blob_bytes(node->blob))) {
+        ++database_->blobs;
+    }
+    auto ready() -> Result<empty, Error> {
+        if (! node_ || ! database_->valid(token_))
+            return Err(error(ErrorKind::State, "blob session is not active"_str));
+        if (database_->cancelled())
+            return Err(error(ErrorKind::Cancelled, "operation cancelled"_str));
+        return Ok(empty {});
+    }
+    auto range(usize count, usize offset) const -> Result<empty, Error> {
+        if (offset > length_ || count > length_ - offset)
+            return Err(error(ErrorKind::Range, "blob range out of bounds"_str));
+        return Ok(empty {});
+    }
+    static auto open_owned(const Arc<Database>& database,
+                           ref<str>             schema,
+                           ref<str>             table,
+                           ref<str>             column,
+                           i64                  row_id,
+                           BlobMode             mode,
+                           unsigned long long   token) -> Result<Blob, Error> {
+        if (! database) return Err(error(ErrorKind::State, "connection is unavailable"_str));
+        DatabaseCall call(database);
+        if (! call.entered) return Err(error(ErrorKind::State, "connection is occupied"_str));
+        if (! database->valid(token))
+            return Err(error(ErrorKind::State, "blob session is not active"_str));
+        if (database->cancelled())
+            return Err(error(ErrorKind::Cancelled, "operation cancelled"_str));
+        if (mode != BlobMode::ReadOnly && mode != BlobMode::ReadWrite)
+            return Err(error(ErrorKind::Input, "invalid blob mode"_str));
+        if (schema.is_empty() || table.is_empty() || column.is_empty())
+            return Err(error(ErrorKind::Input, "empty blob identifier"_str));
+        auto          schema_name = rstd_try(terminated(schema));
+        auto          table_name  = rstd_try(terminated(table));
+        auto          column_name = rstd_try(terminated(column));
+        sqlite3_blob* handle      = nullptr;
+        database->callback_error  = None();
+        int code = sqlite3_blob_open(database->handle,
+                                     reinterpret_cast<const char*>(schema_name.data()),
+                                     reinterpret_cast<const char*>(table_name.data()),
+                                     reinterpret_cast<const char*>(column_name.data()),
+                                     row_id.to_primitive(),
+                                     mode == BlobMode::ReadWrite ? 1 : 0,
+                                     &handle);
+        if (code != SQLITE_OK) {
+            auto failure = database_error(*database, code);
+            if (handle) (void)sqlite3_blob_close(handle);
+            return Err(rstd::move(failure));
+        }
+        if (call.rollback_pending()) {
+            (void)sqlite3_blob_close(handle);
+            return Err(error(ErrorKind::State, "transaction released during operation"_str));
+        }
+        auto node =
+            alloc::boxed::Box<Database::BlobNode>::try_make(Database::BlobNode { handle, nullptr });
+        if (node.is_err()) {
+            (void)sqlite3_blob_close(handle);
+            return Err(database_error(database->handle, SQLITE_NOMEM));
+        }
+        auto pointer = rstd::move(node).unwrap().into_raw().as_raw_ptr();
+        auto value   = Blob(database.clone(), pointer, token, mode);
+        if (call.finish())
+            return Err(error(ErrorKind::State, "transaction released during operation"_str));
+        return Ok(rstd::move(value));
+    }
+
+public:
+    Blob(const Blob&)                    = delete;
+    auto operator=(const Blob&) -> Blob& = delete;
+    Blob(Blob&& other) noexcept
+        : database_(rstd::move(other.database_)),
+          node_(rstd::exchange(other.node_, nullptr)),
+          token_(other.token_),
+          mode_(other.mode_),
+          length_(other.length_) {}
+    auto operator=(Blob&& other) noexcept -> Blob& {
+        if (this != &other) {
+            if (node_) database_->release_blob(node_);
+            database_ = rstd::move(other.database_);
+            node_     = rstd::exchange(other.node_, nullptr);
+            token_    = other.token_;
+            mode_     = other.mode_;
+            length_   = other.length_;
+        }
+        return *this;
+    }
+    ~Blob() {
+        if (node_) database_->release_blob(node_);
+    }
+    // Length is fixed at open. Row updates can expire I/O with SQLite's native error.
+    auto len() -> Result<usize, Error> {
+        if (! database_) return Err(error(ErrorKind::State, "blob is unavailable"_str));
+        DatabaseCall call(database_);
+        if (! call.entered) return Err(error(ErrorKind::State, "connection is occupied"_str));
+        rstd_try(ready());
+        return complete(call, Result<usize, Error>(Ok(length_)));
+    }
+    auto read_at(mut_ref<u8[]> buffer, usize offset) -> Result<empty, Error> {
+        if (! database_) return Err(error(ErrorKind::State, "blob is unavailable"_str));
+        DatabaseCall call(database_);
+        if (! call.entered) return Err(error(ErrorKind::State, "connection is occupied"_str));
+        rstd_try(ready());
+        rstd_try(range(buffer.len(), offset));
+        unsigned char unused {};
+        void*         target      = buffer.is_empty() ? static_cast<void*>(&unused)
+                                                      : static_cast<void*>(buffer.as_raw_ptr());
+        database_->callback_error = None();
+        int code                  = sqlite3_blob_read(
+            node_->blob, target, int(buffer.len().to_primitive()), int(offset.to_primitive()));
+        if (code != SQLITE_OK) return Err(database_error(*database_, code));
+        return complete(call, Result<empty, Error>(Ok(empty {})));
+    }
+    auto write_at(slice<u8> buffer, usize offset) -> Result<empty, Error> {
+        if (! database_) return Err(error(ErrorKind::State, "blob is unavailable"_str));
+        DatabaseCall call(database_);
+        if (! call.entered) return Err(error(ErrorKind::State, "connection is occupied"_str));
+        rstd_try(ready());
+        if (mode_ != BlobMode::ReadWrite)
+            return Err(error(ErrorKind::State, "blob is read-only"_str));
+        rstd_try(range(buffer.len(), offset));
+        const void* source = buffer.is_empty() ? static_cast<const void*>("")
+                                               : static_cast<const void*>(buffer.as_raw_ptr());
+        database_->callback_error = None();
+        int code                  = sqlite3_blob_write(
+            node_->blob, source, int(buffer.len().to_primitive()), int(offset.to_primitive()));
+        if (code != SQLITE_OK) return Err(database_error(*database_, code));
+        return complete(call, Result<empty, Error>(Ok(empty {})));
+    }
+    // Explicit close reports SQLite errors; destruction closes best-effort.
+    auto close() -> Result<empty, Error> {
+        if (! node_) return Ok(empty {});
+        DatabaseCall call(database_);
+        if (! call.entered) return Err(error(ErrorKind::State, "connection is occupied"_str));
+        database_->callback_error = None();
+        int code                  = database_->close_blob(rstd::exchange(node_, nullptr));
+        if (code != SQLITE_OK) return Err(database_error(*database_, code));
+        return complete(call, Result<empty, Error>(Ok(empty {})));
+    }
+};
+
 class Statement {
     friend class Connection;
     friend class Transaction;
@@ -1075,7 +1273,7 @@ auto execute_batch_owned(const Arc<Database>& db, ref<str> sql, unsigned long lo
 export namespace sqlito
 {
 // Synchronous session: serialize all operations on the connection and its
-// statements.
+// statements and blobs.
 class Connection {
     friend class Transaction;
     Arc<Database> database_;
@@ -1119,7 +1317,7 @@ public:
         DatabaseCall call(database_);
         if (! call.entered) return Err(error(ErrorKind::State, "connection is occupied"_str));
         if (! database_->handle) return Ok(empty {});
-        if (! database_->valid(0) || database_->cancellation.is_some())
+        if (! database_->valid(0) || database_->cancellation.is_some() || database_->blobs != 0)
             return Err(error(ErrorKind::State, "connection is occupied"_str));
         database_->callback_error = None();
         int code                  = sqlite3_close(database_->handle);
@@ -1130,6 +1328,14 @@ public:
     }
     auto prepare(ref<str> sql) -> Result<Statement, Error> {
         return prepare_owned(database_, sql, 0);
+    }
+    // Close all blobs before begin/close. A Blob can outlive this Connection object.
+    auto open_blob(ref<str> schema,
+                   ref<str> table,
+                   ref<str> column,
+                   i64      row_id,
+                   BlobMode mode = BlobMode::ReadOnly) -> Result<Blob, Error> {
+        return Blob::open_owned(database_, schema, table, column, row_id, mode, 0);
     }
     // Replaces the name on this connection. Keep the returned owner alive until
     // dependent FTS operations have ended; SQLite holds only weak references.
@@ -1250,11 +1456,11 @@ public:
         DatabaseCall call(database_);
         if (! call.entered) return false;
         return database_ && database_->valid(0) && database_->cancellation.is_none() &&
-               database_->statements == 0;
+               database_->statements == 0 && database_->blobs == 0;
     }
     auto begin(TransactionMode mode = TransactionMode::Deferred) -> Result<Transaction, Error>;
 
-    // Synchronous callback; keep all statements and transactions inside its
+    // Synchronous callback; keep all statements, blobs and transactions inside its
     // scope. Cancellation is cooperative and does not undo a completed commit.
     template<class F>
     auto run(const Cancellation& cancel, F&& function) -> decltype(function(*this)) {
@@ -1378,6 +1584,15 @@ public:
         if (! token_) return Err(error(ErrorKind::State, "transaction is not active"_str));
         return Connection::prepare_owned(database_, sql, token_);
     }
+    // Close before commit. Rollback/drop invalidate I/O, but close remains available.
+    auto open_blob(ref<str> schema,
+                   ref<str> table,
+                   ref<str> column,
+                   i64      row_id,
+                   BlobMode mode = BlobMode::ReadOnly) -> Result<Blob, Error> {
+        if (! token_) return Err(error(ErrorKind::State, "transaction is not active"_str));
+        return Blob::open_owned(database_, schema, table, column, row_id, mode, token_);
+    }
     // Same connection-local counter and timing requirements as Connection::last_changes().
     auto last_changes() -> Result<u64, Error> {
         if (! database_) return Err(error(ErrorKind::State, "transaction is unavailable"_str));
@@ -1397,6 +1612,7 @@ public:
         if (! call.entered) return Err(error(ErrorKind::State, "connection is occupied"_str));
         if (database_ && database_->cancelled())
             return Err(error(ErrorKind::Cancelled, "operation cancelled"_str));
+        if (database_->blobs != 0) return Err(error(ErrorKind::State, "blob is still open"_str));
         return finish("COMMIT");
     }
     auto rollback() -> Result<empty, Error> {
@@ -1418,6 +1634,7 @@ auto Connection::begin(TransactionMode mode) -> Result<Transaction, Error> {
     if (! database_ || ! database_->valid(0) || database_->generation == ~0ULL)
         return Err(error(ErrorKind::State, "connection is unavailable"_str));
     if (database_->cancelled()) return Err(error(ErrorKind::Cancelled, "operation cancelled"_str));
+    if (database_->blobs != 0) return Err(error(ErrorKind::State, "blob is still open"_str));
     for (auto* stmt = sqlite3_next_stmt(database_->handle, nullptr); stmt;
          stmt       = sqlite3_next_stmt(database_->handle, stmt))
         if (sqlite3_stmt_busy(stmt))
