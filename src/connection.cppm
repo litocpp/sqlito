@@ -206,6 +206,12 @@ enum class ColumnType
     Text,
     Blob
 };
+enum class OpenMode
+{
+    ReadOnly,
+    ReadWrite,
+    ReadWriteCreate
+};
 enum class TransactionMode
 {
     Deferred,
@@ -1284,14 +1290,19 @@ public:
     auto operator=(const Connection&) -> Connection&            = delete;
     Connection(Connection&&) noexcept                           = default;
     auto        operator=(Connection&&) noexcept -> Connection& = default;
-    static auto open(ref<str> path) -> Result<Connection, Error> {
+    static auto open(ref<str> path, OpenMode mode = OpenMode::ReadWriteCreate)
+        -> Result<Connection, Error> {
+        int flags = SQLITE_OPEN_FULLMUTEX;
+        switch (mode) {
+        case OpenMode::ReadOnly: flags |= SQLITE_OPEN_READONLY; break;
+        case OpenMode::ReadWrite: flags |= SQLITE_OPEN_READWRITE; break;
+        case OpenMode::ReadWriteCreate: flags |= SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE; break;
+        default: return Err(error(ErrorKind::Input, "invalid connection open mode"_str));
+        }
         auto     name   = rstd_try(terminated(path));
         sqlite3* handle = nullptr;
         int      code =
-            sqlite3_open_v2(reinterpret_cast<const char*>(name.data()),
-                            &handle,
-                            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
-                            nullptr);
+            sqlite3_open_v2(reinterpret_cast<const char*>(name.data()), &handle, flags, nullptr);
         if (code != SQLITE_OK) {
             auto failure = database_error(handle, code);
             if (handle) (void)sqlite3_close(handle);
