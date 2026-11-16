@@ -10,7 +10,7 @@ archive = "sqlito"
 
 [[test]]
 name = "sqlito-tests"
-sources = ["tests/main.cpp", "tests/connections.cpp", "tests/statements.cpp", "tests/transactions.cpp", "tests/cancellation.cpp", "tests/executor.cpp", "tests/blobs.cpp", "tests/returning.cpp", "tests/fts.cpp", "tests/scalar.cpp"]
+sources = ["tests/main.cpp", "tests/connections.cpp", "tests/statements.cpp", "tests/transactions.cpp", "tests/cancellation.cpp", "tests/executor.cpp", "tests/blobs.cpp", "tests/returning.cpp", "tests/fts.cpp", "tests/scalar.cpp", "tests/memory.cpp"]
 link-stdlib = false
 
 [profile.base]
