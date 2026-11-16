@@ -7,7 +7,16 @@ license = "MIT OR Apache-2.0"
 name = "sqlito"
 module = "sqlito"
 archive = "sqlito"
-source-groups = ["sqlite"]
+when = [{ condition = "feature.vendored", source-groups = ["sqlite"] }]
+
+[features.vendored]
+default = false
+
+[external-dependencies.pkg-config.sqlite]
+module = "sqlite3"
+version = ">= 3.47.0"
+pub = true
+condition = "!feature.vendored"
 
 [external-sources.sqlite]
 archive = "https://www.sqlite.org/2026/sqlite-amalgamation-3530400.zip"
@@ -18,10 +27,18 @@ external-source = "sqlite"
 standard = "c99"
 sources = ["sqlite3.c"]
 
-[usage]
+[[when]]
+condition = "feature.vendored"
+
+[when.usage]
 public-include-directories = [{ external-source = "sqlite", path = "." }]
 private-definitions = ["SQLITE_THREADSAFE=1", "SQLITE_ENABLE_FTS5", "SQLITE_OMIT_LOAD_EXTENSION"]
 threads = true
+
+[[when]]
+condition = 'feature.vendored && target.family == "unix"'
+
+[when.usage]
 system-libraries = ["m"]
 
 [[test]]

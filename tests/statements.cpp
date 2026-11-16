@@ -123,12 +123,14 @@ TEST(Sqlite, WritesAndReportsConstraintFailure) {
     EXPECT_EQ(title->as_str(), "quoted ' title"_str);
 }
 
-TEST(Sqlite, PinnedEngineAndFts5AreAvailable) {
-    auto db      = sqlito::Connection::open(":memory:"_str).unwrap();
+TEST(Sqlite, EngineAndFts5AreAvailable) {
+    auto db = sqlito::Connection::open(":memory:"_str).unwrap();
+#if LITO_FEAT_VENDORED
     auto version = db.prepare("SELECT sqlite_version()"_str).unwrap();
     ASSERT_EQ(version.step().unwrap(), sqlito::Step::Row);
     auto value = version.text(usize()).unwrap();
     EXPECT_EQ(value->as_str(), "3.53.4"_str);
+#endif
     auto create = db.prepare("CREATE VIRTUAL TABLE search USING fts5(body)"_str).unwrap();
     EXPECT_EQ(create.step().unwrap(), sqlito::Step::Done);
     auto insert = db.prepare("INSERT INTO search(body) VALUES (?)"_str).unwrap();
