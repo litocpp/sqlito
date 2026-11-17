@@ -7,7 +7,6 @@ license = "MIT OR Apache-2.0"
 name = "sqlito"
 module = "sqlito"
 archive = "sqlito"
-when = [{ condition = "feature.vendored", source-groups = ["sqlite"] }]
 
 [features.vendored]
 default = false
@@ -17,29 +16,6 @@ module = "sqlite3"
 version = ">= 3.47.0"
 pub = true
 condition = "!feature.vendored"
-
-[external-sources.sqlite]
-archive = "https://www.sqlite.org/2026/sqlite-amalgamation-3530400.zip"
-sha256 = "1e71ddf93849c6a6ecf58b827c0692073d2dd7ee40196158068f7b29f422e87d"
-
-[source-groups.sqlite]
-external-source = "sqlite"
-standard = "c99"
-sources = ["sqlite3.c"]
-
-[[when]]
-condition = "feature.vendored"
-
-[when.usage]
-public-include-directories = [{ external-source = "sqlite", path = "." }]
-private-definitions = ["SQLITE_THREADSAFE=1", "SQLITE_ENABLE_FTS5", "SQLITE_OMIT_LOAD_EXTENSION"]
-threads = true
-
-[[when]]
-condition = 'feature.vendored && target.family == "unix"'
-
-[when.usage]
-system-libraries = ["m"]
 
 [[test]]
 name = "sqlito-tests"
@@ -52,6 +28,7 @@ rtti = false
 
 [dependencies]
 rstd-std = { version = "0.1.2", pub = true }
+sqlite = { version = "3.53.4", pub = true, features = ["fts5", "omit-load-extension"], condition = "feature.vendored" }
 
 [dev-dependencies]
 rstd-test = { version = "0.1.2" }
