@@ -1,2 +1,10 @@
+<release version="0.1.1" date="2026-11-18">
+  <description>
+    <ul>
+      <li>Use packaged SQLite for vendored builds.</li>
+      <li>Move SQLite connection and executor implementations out of module interfaces.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.1.0" date="2026-11-17">
 </release>
